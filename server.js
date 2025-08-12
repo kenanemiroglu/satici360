@@ -1,4 +1,3 @@
-
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
@@ -22,7 +21,12 @@ function getBaseUrl() {
 
 // Basit health
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, env: process.env.TRENDYOL_ENV || "stage", time: new Date().toISOString(), hasSecret: !!process.env.API_SECRET });
+  res.json({
+    ok: true,
+    env: process.env.TRENDYOL_ENV || "stage",
+    time: new Date().toISOString(),
+    hasSecret: !!process.env.API_SECRET
+  });
 });
 
 // Orders proxy: /api/orders?status=Awaiting&size=20&page=0 ...
@@ -37,14 +41,14 @@ app.get("/api/orders", async (req, res) => {
     // Build destination URL with original query string
     const base = getBaseUrl();
     const url = new URL(`${base}/integration/order/sellers/${sellerId}/orders`);
-    for (const [k,v] of Object.entries(req.query)) url.searchParams.set(k, v);
+    for (const [k, v] of Object.entries(req.query)) url.searchParams.set(k, v);
     if (!url.searchParams.has("status")) url.searchParams.set("status", "Awaiting");
 
     const auth = Buffer.from(`${sellerId}:${apiKey}`).toString("base64");
     const r = await fetch(url.toString(), {
       headers: {
         "Accept": "application/json",
-        "User-Agent": (process.env.TY_USER_AGENT || "LondApp/1.0 (contact: support@lond.example)")
+        "User-Agent": (process.env.TY_USER_AGENT || "LondApp/1.0 (contact: support@lond.example)"),
         "Authorization": `Basic ${auth}`
       }
     });
@@ -59,7 +63,7 @@ app.get("/api/orders", async (req, res) => {
     }
   } catch (e) {
     console.error(e);
-    res.status(500).json({ ok:false, error: e.message || String(e) });
+    res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
 
