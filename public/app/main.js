@@ -1,177 +1,128 @@
-/* Router */
-    const routes = ["overview","orders","products","costs","commission","mock","profiles","reports"];
-    function setRoute(){
-      const hash = (location.hash||"#/overview");
-      document.querySelectorAll('.nav button').forEach(b=>{b.classList.toggle('active', b.dataset.route===hash)});
-      const id = hash.replace('#/','');
-      routes.forEach(r=>document.getElementById(r).classList.toggle('active', r===id));
-    }
-    window.addEventListener('hashchange', setRoute);
-    document.getElementById('nav').addEventListener('click', (e)=>{const b=e.target.closest('button'); if(b){location.hash=b.dataset.route}});
-    setRoute();
+// Basit durum yazıcı
+const statusEl = document.getElementById("statusText");
+const setStatus = (t) => statusEl.textContent = t;
 
-    const apiBase = '';
+// Sağlık kontrolü
+(async () => {
+  try {
+    const r = await fetch("/api/health");
+    const j = await r.json();
+    document.getElementById("apiState").textContent = j.ok ? `çalışıyor (${j.env})` : "hata";
+  } catch {
+    document.getElementById("apiState").textContent = "erişilemiyor";
+  }
+})();
 
-    /* Health ping */
-    async function ping(){
-      try{await fetch(apiBase + '/api/export/daily.csv', { method:'HEAD' }); document.getElementById('apiState').textContent='çalışıyor';}
-      catch{document.getElementById('apiState').textContent='erişilemiyor';}
-    }
-    ping();
+document.getElementById("refreshBtn").addEventListener("click", () => location.reload());
 
-    /* Overview data (example: uses existing endpoints) */
-    async function loadOverview(){
-      try{
-        // Pull last 30 days chart (reuse daily.csv)
-        const r = await fetch('/api/export/daily.csv');
-        const txt = await r.text();
-        const rows = txt.trim().split(/\n/).slice(1).map(l=>l.split(','));
-        const data = rows.slice(-30).map(r=>({date:r[0], revenue_net:+r[3]||0, profit:+r[10]||0}));
-        // KPIs
-        const sum = (k)=> data.reduce((a,b)=>a+(b[k]||0),0);
-        document.getElementById('kpi_revenue').textContent = sum('revenue_net').toLocaleString('tr-TR');
-        document.getElementById('kpi_profit').textContent = sum('profit').toLocaleString('tr-TR');
-        // fake rates from last 7 entries
-        const last7 = data.slice(-7);
-        const ret = Math.min(25, Math.round((Math.random()*3+5)*10)/10); // placeholder if not available
-        const can = Math.min(15, Math.round((Math.random()*1+2)*10)/10);
-        document.getElementById('kpi_return').textContent = ret;
-        document.getElementById('kpi_cancel').textContent = can;
-        drawChart('chart', data);
+document.getElementById("fetchOrdersBtn").addEventListener("click", loadOrders);
 
-        // Recent orders (reuse products.csv for demo, replace with /api/orders if available)
-        const r2 = await fetch('/api/export/products.csv');
-        const t2 = await r2.text();
-        const rs = t2.trim().split(/\n/).slice(1).map(l=>l.split(','));
-        const tbody = document.querySelector('#tbl_orders tbody');
-        tbody.innerHTML = '';
-        rs.slice(0,20).forEach(r=>{
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${r[0]||'-'}</td><td>${r[1]||'-'}</td><td>${r[2]||'-'}</td><td>${(+r[3]||0).toLocaleString('tr-TR')}</td><td>${(+r[4]||0).toLocaleString('tr-TR')}</td>`;
-          tbody.appendChild(tr);
-        });
-      }catch(e){console.error(e)}
-    }
-    loadOverview();
+async function loadOrders(){
+  const status = document.getElementById("statusSel").value || "Awaiting";
+  const size = +document.getElementById("sizeInp").value || 20;
+  const page = +document.getElementById("pageInp").value || 0;
 
-    /* Orders list */
-    document.getElementById('btn_export_daily').addEventListener('click',()=>{location.href='/api/export/daily.csv'});
+  setStatus("Yükleniyor…");
+  try{
+    const url = `/api/orders?status=${encodeURIComponent(status)}&size=${size}&page=${page}`;
+    const r = await fetch(url, { headers: { "Accept":"application/json" }});
+    const text = await r.text();
 
-    /* Products list */
-    async function loadProducts(){
-      try{
-        const r = await fetch('/api/export/products.csv');
-        const txt = await r.text();
-        const rows = txt.trim().split(/\n/).slice(1).map(l=>l.split(','));
-        const tbody = document.querySelector('#products_list tbody');
-        tbody.innerHTML='';
-        rows.forEach(r=>{
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${r[1]}</td><td>${r[2]}</td><td>${r[5]||'-'}</td><td>${(+r[6]||0).toLocaleString('tr-TR')}</td>`;
-          tbody.appendChild(tr);
-        })
-      }catch(e){console.error(e)}
-    }
-    loadProducts();
-
-    /* Costs upload */
-    document.getElementById('btn_cost_upload').addEventListener('click', async ()=>{
-      const f = document.getElementById('costFile').files[0];
-      if(!f) return alert('CSV seçin');
-      const fd=new FormData(); fd.append('file', f);
-      const r = await fetch('/api/costs/upload', { method:'POST', body:fd });
-      const j = await r.json().catch(()=>({}));
-      document.getElementById('costStatus').textContent = j.ok ? `✓ ${j.inserted} satır` : `Hata: ${j.error||'bilinmiyor'}`;
-    });
-
-    /* Commission CRUD */
-    document.getElementById('addRule').addEventListener('click', async()=>{
-      const shopId = (document.getElementById('shopId').value||'').trim();
-      const category = (document.getElementById('category').value||'').trim();
-      const rate = Number(document.getElementById('rate').value||0);
-      if(!shopId||!category) return alert('Shop ID ve kategori gerekli');
-      const r = await fetch(`/api/commission/${encodeURIComponent(shopId)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ category, rate_pct: rate })});
-      const j = await r.json().catch(()=>({}));
-      alert(j.ok? 'Kural kaydedildi':'Hata: '+(j.error||'bilinmiyor'));
-    });
-    document.getElementById('loadRules').addEventListener('click', async()=>{
-      const shopId = (document.getElementById('shopId').value||'').trim();
-      if(!shopId) return alert('Shop ID gerekli');
-      const r = await fetch(`/api/commission/${encodeURIComponent(shopId)}`);
-      const j = await r.json().catch(()=>[]);
-      document.getElementById('rulesOut').textContent = JSON.stringify(j,null,2);
-    });
-
-    /* Mock generate */
-    document.getElementById('btn_mock_start').addEventListener('click', async()=>{
-      const b = {
-        days: +document.getElementById('days').value||30,
-        per_day: +document.getElementById('per_day').value||50,
-        return_rate: (+document.getElementById('return_rate').value||7)/100,
-        cancel_rate: (+document.getElementById('cancel_rate').value||2)/100,
-        coupon_rate: (+document.getElementById('coupon_rate').value||10)/100,
-      };
-      const r = await fetch('/api/mock/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b)});
-      const j = await r.json().catch(()=>({}));
-      document.getElementById('mockStatus').textContent = j.ok? `✓ İş kuyruğuna alındı (${b.days} gün)`: `Hata: ${j.error||'bilinmiyor'}`;
-    });
-
-    /* Profiles */
-    document.getElementById('saveProfile').addEventListener('click', async()=>{
-      const name=(document.getElementById('profName').value||'').trim();
-      let params={}; try{params=JSON.parse(document.getElementById('profParams').value||'{}')}catch(e){return alert('JSON geçersiz')}
-      const r = await fetch('/api/mock/profiles', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, params })});
-      const j = await r.json().catch(()=>({}));
-      alert(j.ok? 'Kaydedildi':'Hata: '+(j.error||'bilinmiyor'));
-    });
-    document.getElementById('loadProfiles').addEventListener('click', async()=>{
-      const r = await fetch('/api/mock/profiles');
-      const j = await r.json().catch(()=>[]);
-      document.getElementById('profilesOut').textContent = JSON.stringify(j,null,2);
-    });
-    document.getElementById('runProfile').addEventListener('click', async()=>{
-      const profileName=(document.getElementById('runProfileName').value||'').trim();
-      const from=(document.getElementById('runFrom').value||'').trim();
-      const to=(document.getElementById('runTo').value||'').trim();
-      if(!profileName||!from||!to) return alert('Eksik alan var');
-      const r = await fetch('/api/mock/run-profile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ profileName, from, to })});
-      const j = await r.json().catch(()=>({}));
-      document.getElementById('runStatus').textContent = j.ok? `✓ Kuyruğa ${j.enqueued} gün eklendi`:`Hata: ${j.error||'bilinmiyor'}`;
-    });
-
-    /* Tiny chart */
-    function drawChart(id, data){
-      const c = document.getElementById(id); if(!c) return; const ctx=c.getContext('2d');
-      const W=c.width=c.clientWidth, H=c.height=220, pad=28;
-      ctx.clearRect(0,0,W,H);
-      const xs=(i,n)=> pad + i*((W-2*pad)/Math.max(1,n-1));
-      const getYs=(key)=>{const vals=data.map(d=>d[key]); const max=Math.max(1,...vals); return vals.map(v=> H-pad - (v/max)*(H-2*pad));};
-      const x=data.map((_,i)=>xs(i,data.length)); const y1=getYs('revenue_net'), y2=getYs('profit');
-      // axes
-      ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.beginPath(); ctx.moveTo(pad,pad); ctx.lineTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
-      // line1 revenue
-      ctx.strokeStyle='rgba(108,140,255,.95)'; ctx.lineWidth=2; ctx.beginPath(); x.forEach((xi,i)=>{i?ctx.lineTo(xi,y1[i]):ctx.moveTo(xi,y1[i])}); ctx.stroke();
-      // line2 profit
-      ctx.strokeStyle='rgba(61,217,184,.95)'; ctx.lineWidth=2; ctx.beginPath(); x.forEach((xi,i)=>{i?ctx.lineTo(xi,y2[i]):ctx.moveTo(xi,y2[i])}); ctx.stroke();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      // Backend zaten JSON kılıfına sarıyor; ama yine de gösterelim
+      data = { ok:false, raw:text };
     }
 
+    // ham çıktıyı debug için göstermek istersen:
+    const raw = document.getElementById("rawOut");
+    raw.style.display = "none";
+    raw.textContent = "";
 
-    // Ekstra: Trendyol siparişlerini test etmek için küçük bir buton
-    const topBar = document.querySelector('.top .row');
-    if (topBar) {
-      const b = document.createElement('button');
-      b.className = 'btn ghost';
-      b.textContent = 'Trendyol Siparişlerini Çek';
-      b.onclick = async () => {
-        try {
-          const r = await fetch('/api/orders?status=Awaiting&size=20&page=0');
-          const j = await r.json();
-          console.log('Trendyol orders sample:', j);
-          alert('Siparişler çekildi: konsola bakın');
-        } catch (e) {
-          alert('Hata: ' + e.message);
-        }
-      };
-      topBar.appendChild(b);
+    // Trendyol yanıt şekilleri farklı olabilir; yaygın olasılıkları toparlayalım
+    const rows = normalizeOrders(data);
+
+    renderTable(rows);
+
+    if (rows.length === 0) {
+      document.getElementById("emptyHint").style.display = "block";
+      raw.style.display = "block";
+      raw.textContent = JSON.stringify(data, null, 2);
+      setStatus(`Bitti • kayıt yok (HTTP ${r.status})`);
+    } else {
+      document.getElementById("emptyHint").style.display = "none";
+      setStatus(`Bitti • ${rows.length} kayıt (HTTP ${r.status})`);
     }
-    
+  }catch(e){
+    setStatus("Hata: " + (e.message||e));
+  }
+}
+
+// Trendyol olası yanıtlarını tek bir diziye dönüştür
+function normalizeOrders(resp){
+  // Bazı dökümanlarda data.content, bazı örneklerde result.content vb. olabilir
+  const candidates = [
+    resp?.content,
+    resp?.result?.content,
+    resp?.orders,
+    resp?.data?.content,
+    Array.isArray(resp) ? resp : null
+  ].filter(Boolean)[0];
+
+  const list = Array.isArray(candidates) ? candidates : [];
+
+  // Alan isimleri de farklı olabilir; güvenli erişim yapalım
+  return list.map((o, i) => {
+    const orderId = o.id ?? o.orderId ?? o.number ?? o.orderNumber ?? o.packageId ?? "";
+    const orderNo = o.orderNumber ?? o.number ?? orderId ?? "";
+    const status = o.status ?? o.orderStatus ?? o.packageStatus ?? "";
+    const total = (
+      o.totalPrice ?? o.totalAmount ?? o.price ?? o.grossAmount ?? 0
+    );
+    const created = o.createdDate ?? o.orderDate ?? o.createDate ?? o.createdAt ?? "";
+    const customer = [
+      o.customer?.firstName,
+      o.customer?.lastName
+    ].filter(Boolean).join(" ") || (o.customerName ?? o.buyerName ?? "");
+
+    return { idx: i+1, orderNo, customer, status, total, created };
+  });
+}
+
+function renderTable(rows){
+  const tbody = document.querySelector("#ordersTable tbody");
+  tbody.innerHTML = "";
+  rows.forEach(r=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.idx}</td>
+      <td>${safe(r.orderNo)}</td>
+      <td>${safe(r.customer)}</td>
+      <td><span class="pill">${safe(r.status)}</span></td>
+      <td>${formatMoney(r.total)}</td>
+      <td>${formatDate(r.created)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function safe(v){ return (v===undefined||v===null) ? "" : String(v); }
+function formatMoney(v){
+  const n = Number(v||0);
+  return n ? n.toLocaleString("tr-TR", { style:"currency", currency:"TRY" }) : "";
+}
+function formatDate(v){
+  if(!v) return "";
+  try{
+    // ISO tarihse
+    const d = new Date(v);
+    if(!isNaN(d.getTime())) return d.toLocaleString("tr-TR");
+    // epoch sayısıysa
+    const n = Number(v);
+    if(!isNaN(n)) return new Date(n).toLocaleString("tr-TR");
+  }catch{}
+  return String(v);
+}
+
+// İlk yüklemede otomatik dene
+loadOrders();
